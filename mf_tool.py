@@ -175,8 +175,8 @@ class BoardItems:
 
 def test2():
     # load board to be panelized
-    #b1 = pcbnew.LoadBoard(r'D:\work\smarthome\pcb\switch.kicad_pcb')
-    b2 = pcbnew.LoadBoard(r'D:\work\smarthome\pcb\touch\touch.kicad_pcb')
+    #b1 = pcbnew.LoadBoard(r'test1.kicad_pcb')
+    b2 = pcbnew.LoadBoard(r'test2.kicad_pcb')
     # Get current work borad, must be a empty board
     brd = pcbnew.GetBoard()
     # Collect items
