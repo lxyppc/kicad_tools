@@ -4,6 +4,7 @@ import pcbnew
 import csv
 import re
 import sys
+import os
 
 class RefBuilder:
     ''' RefBuilder use to re-build the module referrence number
@@ -330,6 +331,138 @@ def PrintPOS(Poses):
        i = i+ 1
        for v in pos:
            v.Output()
+def CollectItemByName(filename = None):
+    pass
+
+def CollectItem(brd = None):
+    if not brd:
+        brd = pcbnew.GetBoard()
+    bi = BoardItems()
+    bi.Collect()
+    return bi
+    
+def OpenCSV(fileName):
+    try:
+        f = open(fileName, 'w+')
+    except IOError:
+        e = "Can't open output file for writing: " + sys.argv[2]
+        print( __file__, ":", e, sys.stderr )
+        f = sys.stdout
+    out = csv.writer( f, lineterminator='\n', delimiter=',', quotechar='\"', quoting=csv.QUOTE_MINIMAL )
+    return out
+    
+def GenMFDoc(SplitTopAndBottom = False):
+    brd = pcbnew.GetBoard()
+    fName = brd.GetFileName()
+    path = os.path.split(fName)[0]
+    fName = os.path.split(fName)[1]
+    bomName = fName.rsplit('.',1)[0]
+
+    
+    bomSMDTop = GenBOM(brd, pcbnew.F_Cu, 1)
+    bomHoleTop = GenBOM(brd, pcbnew.F_Cu, 0)
+    
+    bomSMDBot = GenBOM(brd, pcbnew.B_Cu, 1)
+    bomHoleBot = GenBOM(brd, pcbnew.B_Cu, 0)
+    
+    posSMDTop = GenPos(brd, pcbnew.F_Cu, 1)
+    posHoleTop = GenPos(brd, pcbnew.F_Cu, 0)
+    
+    posSMDBot = GenPos(brd, pcbnew.B_Cu, 1)
+    posHoleBot = GenPos(brd, pcbnew.B_Cu, 0)
+    
+    if SplitTopAndBottom:
+        fName = bomName
+        bomName = path + '/' + fName + '_BOM_TOP.csv'
+        posName = path + '/' + fName + '_POS_TOP.csv'
+        # Generate BOM for Top layer
+        print 'Genertate BOM file ', bomName
+        csv = OpenCSV(bomName)
+        OutputBOMHeader(csv)
+        for k,v in bomSMDTop.items():
+           v.Output(csv)
+        csv.writerow(['Through Hole Items '])
+        for k,v in bomHoleTop.items():
+           v.Output(csv)
+        
+        # Generate POS for Top layer
+        print 'Genertate POS file ', posName
+        csv = OpenCSV(posName)
+        OutputPosHeader(csv)
+        for v in posSMDTop:
+           v.Output(csv)
+        csv.writerow(['Through Hole Items '])
+        for v in posHoleTop:
+           v.Output(csv)
+           
+        bomName = path + '/' + fName + '_BOM_BOT.csv'
+        posName = path + '/' + fName + '_POS_BOT.csv'
+        # Generate BOM for Bottom layer
+        print 'Genertate BOM file ', bomName
+        csv = OpenCSV(bomName)
+        OutputBOMHeader(csv)
+        for  k,v in bomSMDBot.items():
+           v.Output(csv)
+        csv.writerow(['Through Hole Items '])
+        for k,v in bomHoleBot.items():
+           v.Output(csv)
+        # Generate POS for Bottom layer   
+        print 'Genertate POS file ', posName
+        csv = OpenCSV(posName)
+        OutputPosHeader(csv)        
+        for v in posSMDBot:
+           v.Output(csv)
+        csv.writerow(['Through Hole Items '])
+        for v in posHoleBot:
+           v.Output(csv)
+        
+    else:
+        posName = path + '/' + bomName + '_POS.csv'
+        bomName = path + '/' + bomName + '_BOM.csv'
+        # Generate BOM for both layer
+        print 'Genertate BOM file ', bomName
+        csv = OpenCSV(bomName)
+        OutputBOMHeader(csv)
+        for k,v in bomSMDTop.items():
+           v.Output(csv)
+           
+        for  k,v in bomSMDBot.items():
+           v.Output(csv)
+        
+        csv.writerow(['Through Hole Items '])
+        for k,v in bomHoleTop.items():
+           v.Output(csv)
+           
+        for k,v in bomHoleBot.items():
+           v.Output(csv)
+        
+        
+        # Generate POS for both layer
+        print 'Genertate POS file ', posName
+    
+        csv = OpenCSV(posName)
+        OutputPosHeader(csv)
+        for v in posSMDTop:
+           v.Output(csv)
+           
+        for v in posSMDBot:
+           v.Output(csv)
+        
+        csv.writerow(['Through Hole Items '])
+        for v in posHoleTop:
+           v.Output(csv)
+           
+        for v in posHoleBot:
+           v.Output(csv)
+    
+    
+    
+    
+    
+    
+    
+    
+    
     
     
     
