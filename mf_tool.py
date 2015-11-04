@@ -20,7 +20,7 @@ class RefBuilder:
         if init_ref:
             self.refMap = init_ref
     def collect(self, ref):
-        m = re.match(r'([a-zA-Z]+)\s*(\d+)', ref)
+        m = self.patten.match(ref)
         if m:
             if not self.refMap.has_key(m.group(1)):
                 self.refMap[m.group(1)] = m.group(2)
@@ -55,7 +55,7 @@ class RefBuilder:
 def testRefBuilder():
     rb = RefBuilder()
     rb.collects(['R1','R2','R14', 'R10', 'D1', 'D2', 'U3', 'U2', 'U1'])
-    rb.show()
+    rb.Show()
     print 'R1 -> %s'%rb.build('R1')
     print 'R2 -> %s'%rb.build('R2')
     print 'R3 -> %s'%rb.build('R3')
@@ -67,7 +67,7 @@ def testRefBuilder():
     print 'R1 -> %s'%rb.build('R1')
     print 'R2 -> %s'%rb.build('R2')
     print 'X2 -> %s'%rb.build('X2')
-    rb.show()
+    rb.Show()
 
 # Get Board Bounding rect by the margin layer element
 def GetBoardArea(brd = None, marginLayer = pcbnew.Margin):
@@ -76,7 +76,6 @@ def GetBoardArea(brd = None, marginLayer = pcbnew.Margin):
   rect = None
   for dwg in brd.GetDrawings():
     if dwg.GetLayer() == marginLayer:
-        # Margin layer
         box = dwg.GetBoundingBox()
         if rect:
             rect.Merge(box)
@@ -137,13 +136,23 @@ class BoardItems:
             item.Rotate(rotPt, angle * 10)
     def MoveToMM(self, x, y):
         self.MoveTo(pcbnew.wxPointMM(x,y))
+    def ShowRect(self):
+        r = '('
+        r += str(self.rect.GetX()/1000000) + ','
+        r += str(self.rect.GetY()/1000000) + ','
+        r += str(self.rect.GetWidth()/1000000) + ','
+        r += str(self.rect.GetHeight()/1000000) + ')'
+        return r
     def MoveTo(self, pos):
         off = pcbnew.wxPoint( pos.x - self.rect.GetX(), pos.y - self.rect.GetY() )
         #print 'org is:', self.x, ',', self.y
         #print 'off is:', off
         for item in self.orgItems:
             item.Move(off)
+        print 'Move item in ', self.ShowRect(), 'off = (', off.x/1000000, ',' ,off.y/1000000,')'
         self.rect.Move(off)
+        print 'Result is ', self.ShowRect()
+        
     def Clone(self, brd = None):
         if not brd:
             brd = self.brd
@@ -173,6 +182,7 @@ class BoardItems:
         for item in self.orgItems:
             self.brd.Remove(item)
             brd.Add(item)
+        self.brd = brd
 
 def test2():
     # load board to be panelized
@@ -244,15 +254,26 @@ class BOMItem:
 def OutputBOMHeader(out = None):
     if not out:
         out = csv.writer(sys.stdout, lineterminator='\n', delimiter=',', quotechar='\"', quoting=csv.QUOTE_ALL)
-    out.writerow(['Comment','Description','Designator','Footprint','LibRef','Pins','Quantity','Number'])
+    out.writerow(['Comment','Description','Designator','Footprint','LibRef','Pins','Quantity','\xb1\xe0\xba\xc5'])
 
-def GenBOM(brd = None, layer = pcbnew.F_Cu, type = 1):
+def IsModExclude(mod, ExcludeRefs = [], ExcludeValues = []):
+    r = mod.GetReference()
+    v = mod.GetValue()
+    for pat in ExcludeRefs:
+        if pat.match(r):
+            return True
+    for pat in ExcludeValues:
+        if pat.match(v):
+            return True
+    return False
+    
+def GenBOM(brd = None, layer = pcbnew.F_Cu, type = 1, ExcludeRefs = [], ExcludeValues = []):
     if not brd:
         brd = pcbnew.GetBoard()
     bomList = {}
     for mod in brd.GetModules():
         needOutput = False
-        if mod.GetLayer() == layer:
+        if (mod.GetLayer() == layer) and (not IsModExclude(mod, ExcludeRefs, ExcludeValues)):
             needOutput = IsSMD(mod) == (type == 1)
         if needOutput:
             v = mod.GetValue()
@@ -300,13 +321,13 @@ class POSItem:
                      str(self.RefX), str(self.RefY), str(self.PadX), str(self.PadY),
                      self.layer, str(self.rot), self.val])
 
-def GenPos(brd = None, layer = pcbnew.F_Cu, type = 1):
+def GenPos(brd = None, layer = pcbnew.F_Cu, type = 1, ExcludeRefs = [], ExcludeValues = []):
     if not brd:
         brd = pcbnew.GetBoard()
     posList = []
     for mod in brd.GetModules():
         needOutput = False
-        if mod.GetLayer() == layer:
+        if (mod.GetLayer() == layer) and (not IsModExclude(mod, ExcludeRefs, ExcludeValues)):
             needOutput = IsSMD(mod) == (type == 1)
         if needOutput:
             posList.append(POSItem(mod))
@@ -332,44 +353,77 @@ def PrintPOS(Poses):
        for v in pos:
            v.Output()
 def CollectItemByName(filename = None):
-    pass
+    try:
+        brd = pcbnew.LoadBoard(filename)
+    except IOError:
+        print 'Can not open ', filename
+        filename = os.path.split(pcbnew.GetBoard().GetFileName())[0] + '\\' + filename
+        print 'Try to open ', filename
+    try:
+        brd = pcbnew.LoadBoard(filename)
+    except IOError:
+        print 'Can not open ', filename
+        return None
+    bi = BoardItems()
+    bi.Collect(brd)
+    return bi
 
 def CollectItem(brd = None):
     if not brd:
         brd = pcbnew.GetBoard()
     bi = BoardItems()
-    bi.Collect()
+    bi.Collect(brd)
     return bi
+    
+def CopyItemTo(boardItem, x, y):
+    newBI = boardItem.Clone()
+    newBI.MoveToMM(x, y)
+    return newBI
+
+def MirrorItemTo(boardItem, x, y):
+    newBI = boardItem.Clone()
+    newBI.MoveToMM(x, y)
+    newBI.Mirror()
+    return newBI
     
 def OpenCSV(fileName):
     try:
         f = open(fileName, 'w+')
     except IOError:
-        e = "Can't open output file for writing: " + sys.argv[2]
+        e = "Can't open output file for writing: " + fileName
         print( __file__, ":", e, sys.stderr )
         f = sys.stdout
     out = csv.writer( f, lineterminator='\n', delimiter=',', quotechar='\"', quoting=csv.QUOTE_MINIMAL )
     return out
+
+def PreCompilePattenList(pattenList):
+    res = []
+    for pat in pattenList:
+        res.append(re.compile(pat))
+    return res
     
-def GenMFDoc(SplitTopAndBottom = False):
-    brd = pcbnew.GetBoard()
+def GenMFDoc(SplitTopAndBottom = False, ExcludeRef = [], ExcludeValue = [], brd = None):
+    if not brd:
+        brd = pcbnew.GetBoard()
     fName = brd.GetFileName()
     path = os.path.split(fName)[0]
     fName = os.path.split(fName)[1]
     bomName = fName.rsplit('.',1)[0]
+    
+    excludeRefs = PreCompilePattenList(ExcludeRef)
+    excludeValues = PreCompilePattenList(ExcludeValue)
 
+    bomSMDTop = GenBOM(brd, pcbnew.F_Cu, 1, excludeRefs, excludeValues)
+    bomHoleTop = GenBOM(brd, pcbnew.F_Cu, 0, excludeRefs, excludeValues)
     
-    bomSMDTop = GenBOM(brd, pcbnew.F_Cu, 1)
-    bomHoleTop = GenBOM(brd, pcbnew.F_Cu, 0)
+    bomSMDBot = GenBOM(brd, pcbnew.B_Cu, 1, excludeRefs, excludeValues)
+    bomHoleBot = GenBOM(brd, pcbnew.B_Cu, 0, excludeRefs, excludeValues)
     
-    bomSMDBot = GenBOM(brd, pcbnew.B_Cu, 1)
-    bomHoleBot = GenBOM(brd, pcbnew.B_Cu, 0)
+    posSMDTop = GenPos(brd, pcbnew.F_Cu, 1, excludeRefs, excludeValues)
+    posHoleTop = GenPos(brd, pcbnew.F_Cu, 0, excludeRefs, excludeValues)
     
-    posSMDTop = GenPos(brd, pcbnew.F_Cu, 1)
-    posHoleTop = GenPos(brd, pcbnew.F_Cu, 0)
-    
-    posSMDBot = GenPos(brd, pcbnew.B_Cu, 1)
-    posHoleBot = GenPos(brd, pcbnew.B_Cu, 0)
+    posSMDBot = GenPos(brd, pcbnew.B_Cu, 1, excludeRefs, excludeValues)
+    posHoleBot = GenPos(brd, pcbnew.B_Cu, 0, excludeRefs, excludeValues)
     
     if SplitTopAndBottom:
         fName = bomName
@@ -381,9 +435,10 @@ def GenMFDoc(SplitTopAndBottom = False):
         OutputBOMHeader(csv)
         for k,v in bomSMDTop.items():
            v.Output(csv)
-        csv.writerow(['Through Hole Items '])
-        for k,v in bomHoleTop.items():
-           v.Output(csv)
+        if len(bomHoleTop)>0:
+            csv.writerow(['Through Hole Items '])
+            for k,v in bomHoleTop.items():
+                v.Output(csv)
         
         # Generate POS for Top layer
         print 'Genertate POS file ', posName
@@ -391,9 +446,10 @@ def GenMFDoc(SplitTopAndBottom = False):
         OutputPosHeader(csv)
         for v in posSMDTop:
            v.Output(csv)
-        csv.writerow(['Through Hole Items '])
-        for v in posHoleTop:
-           v.Output(csv)
+        if len(posHoleTop)>0:
+            csv.writerow(['Through Hole Items '])
+            for v in posHoleTop:
+               v.Output(csv)
            
         bomName = path + '/' + fName + '_BOM_BOT.csv'
         posName = path + '/' + fName + '_POS_BOT.csv'
@@ -403,18 +459,20 @@ def GenMFDoc(SplitTopAndBottom = False):
         OutputBOMHeader(csv)
         for  k,v in bomSMDBot.items():
            v.Output(csv)
-        csv.writerow(['Through Hole Items '])
-        for k,v in bomHoleBot.items():
-           v.Output(csv)
+        if len(bomHoleBot)>0:
+            csv.writerow(['Through Hole Items '])
+            for k,v in bomHoleBot.items():
+               v.Output(csv)
         # Generate POS for Bottom layer   
         print 'Genertate POS file ', posName
         csv = OpenCSV(posName)
         OutputPosHeader(csv)        
         for v in posSMDBot:
            v.Output(csv)
-        csv.writerow(['Through Hole Items '])
-        for v in posHoleBot:
-           v.Output(csv)
+        if len(posHoleBot)>0:
+            csv.writerow(['Through Hole Items '])
+            for v in posHoleBot:
+               v.Output(csv)
         
     else:
         posName = path + '/' + bomName + '_POS.csv'
@@ -428,13 +486,13 @@ def GenMFDoc(SplitTopAndBottom = False):
            
         for  k,v in bomSMDBot.items():
            v.Output(csv)
-        
-        csv.writerow(['Through Hole Items '])
-        for k,v in bomHoleTop.items():
-           v.Output(csv)
-           
-        for k,v in bomHoleBot.items():
-           v.Output(csv)
+        if len(bomHoleTop)+len(bomHoleBot)>0:
+            csv.writerow(['Through Hole Items '])
+            for k,v in bomHoleTop.items():
+               v.Output(csv)
+               
+            for k,v in bomHoleBot.items():
+               v.Output(csv)
         
         
         # Generate POS for both layer
@@ -447,13 +505,13 @@ def GenMFDoc(SplitTopAndBottom = False):
            
         for v in posSMDBot:
            v.Output(csv)
-        
-        csv.writerow(['Through Hole Items '])
-        for v in posHoleTop:
-           v.Output(csv)
-           
-        for v in posHoleBot:
-           v.Output(csv)
+        if len(posHoleTop)+len(posHoleBot)>0:
+            csv.writerow(['Through Hole Items '])
+            for v in posHoleTop:
+               v.Output(csv)
+               
+            for v in posHoleBot:
+               v.Output(csv)
     
     
     
