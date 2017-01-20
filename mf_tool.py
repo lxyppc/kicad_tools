@@ -88,6 +88,23 @@ def GetBoardArea(brd = None, marginLayer = pcbnew.Margin):
   #print rect.GetX(), rect.GetY(), rect.GetWidth(), rect.GetHeight()
   return rect
 
+def GetOtherBoard(brd):
+    r = brd
+    curbrd = pcbnew.GetBoard()
+    s = curbrd.GetFileName()
+    if not brd:
+        brd = curbrd
+    elif type(brd) == str:
+        if os.path.exists(brd):
+            brd = pcbnew.LoadBoard(brd)
+        elif os.path.exists(s[0:s.rfind('/')] + '/' + brd):
+            brd = pcbnew.LoadBoard(s[0:s.rfind('/')] + '/' + brd)
+        else:
+            return None
+    else:
+        return brd
+    return brd
+    
 class BoardItems:
     '''  Class to hold all interest board items
          Use Collect method to get all board items
@@ -96,20 +113,23 @@ class BoardItems:
     def __init__(self):
         self.rb = RefBuilder()
         self.orgItems = []
+        self.mods = []
         self.rect = None
     def ItemValid(self, item):
         ''' Check the item is in the rect or not'''
         return item.HitTest(self.rect, False)
     def Collect(self, brd = None, rect = None):
         ''' Collect board items in specify rect'''
-        if not brd:
-            brd = pcbnew.GetBoard()
+        brd = GetOtherBoard(brd)
+        #if not brd:
+        #    brd = pcbnew.GetBoard()
         if not rect:
             rect = GetBoardArea(brd)
         self.rect = rect
         for mod in brd.GetModules():
             if self.ItemValid(mod):
                 self.orgItems.append(mod)
+                self.mods.append(mod)
                 self.rb.collect(mod.GetReference())
         for track in brd.GetTracks():
             if self.ItemValid(track):
@@ -183,6 +203,12 @@ class BoardItems:
             self.brd.Remove(item)
             brd.Add(item)
         self.brd = brd
+    def HideValue(self, hide = True):
+        for m in self.mods:
+            if hide:
+                m.Value().SetVisible(False)
+            else:
+                m.Value().SetVisible(True)
 
 def test2():
     # load board to be panelized
