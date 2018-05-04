@@ -1,4 +1,4 @@
-#KiCAD生产文件生成器
+# KiCAD生产文件生成器
 
 使用方法:
 
@@ -11,7 +11,7 @@ mf.GenMFDoc()
 ```
 3 BOM文件和位置文件会以CSV格式存放在电路板相同目录下
 
-##注意:
+## 注意:
 
 GenMFDoc() 会改变电路板的钻孔原点。建议先用GenMFDoc()生成BOM文件和位置文件，再生成Gerber文件。
 
@@ -32,6 +32,6 @@ mf.GenMFDoc()
 
 step 3: the BOM and Postion CSV file will be generated under the same folder of the board file
 
-##Attention:
+## Attention:
 
 The GenMFDoc() command will change the Aux original point
