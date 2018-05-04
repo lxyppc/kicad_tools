@@ -70,23 +70,54 @@ def testRefBuilder():
     rb.Show()
 
 # Get Board Bounding rect by the margin layer element
-def GetBoardArea(brd = None, marginLayer = pcbnew.Margin):
-  if not brd:
-    brd = pcbnew.GetBoard()
-  rect = None
-  for dwg in brd.GetDrawings():
-    if dwg.GetLayer() == marginLayer:
-        box = dwg.GetBoundingBox()
-        if rect:
-            rect.Merge(box)
-        else:
-            rect = box
-  rect.SetX(rect.GetX() + 100001)
-  rect.SetY(rect.GetY() + 100001)
-  rect.SetWidth(rect.GetWidth() - 200002)
-  rect.SetHeight(rect.GetHeight() - 200002)
-  #print rect.GetX(), rect.GetY(), rect.GetWidth(), rect.GetHeight()
-  return rect
+#def GetBoardArea(brd = None, marginLayer = pcbnew.Margin):
+#  if not brd:
+#    brd = pcbnew.GetBoard()
+#  rect = None
+#  for dwg in brd.GetDrawings():
+#    if dwg.GetLayer() == marginLayer:
+#        box = dwg.GetBoundingBox()
+#        if rect:
+#            rect.Merge(box)
+#        else:
+#            rect = box
+#  rect.SetX(rect.GetX() + 100001)
+#  rect.SetY(rect.GetY() + 100001)
+#  rect.SetWidth(rect.GetWidth() - 200002)
+#  rect.SetHeight(rect.GetHeight() - 200002)
+#  #print rect.GetX(), rect.GetY(), rect.GetWidth(), rect.GetHeight()
+#  return rect
+
+def GetBoardBound(brd = None, marginLayer = pcbnew.Edge_Cuts):
+    ''' Calculate board edge from the margin layer, the default margin layer is Edge_Cuts
+        enum all the draw segment on the specified layer, and merge their bound rect
+    '''
+    if not brd:
+        brd = pcbnew.GetBoard()
+    rect = None
+    l = None
+    r = None
+    t = None
+    b = None
+    for dwg in brd.GetDrawings():
+        if dwg.GetLayer() == marginLayer:
+            d = dwg.Cast_to_DRAWSEGMENT()
+            w = d.GetWidth()
+            box = d.GetBoundingBox()
+            box.SetX(box.GetX() + w/2)
+            box.SetY(box.GetY() + w/2)
+            box.SetWidth(box.GetWidth() - w)
+            box.SetHeight(box.GetHeight() - w)
+            if rect:
+                rect.Merge(box)
+            else:
+                rect = box
+    w = 2
+    rect.SetX(rect.GetX() + w/2)
+    rect.SetY(rect.GetY() + w/2)
+    rect.SetWidth(rect.GetWidth() - w)
+    rect.SetHeight(rect.GetHeight() - w)
+    return rect
 
 def GetOtherBoard(brd):
     r = brd
@@ -124,7 +155,7 @@ class BoardItems:
         #if not brd:
         #    brd = pcbnew.GetBoard()
         if not rect:
-            rect = GetBoardArea(brd)
+            rect = GetBoardBound(brd)
         self.rect = rect
         for mod in brd.GetModules():
             if self.ItemValid(mod):
@@ -310,8 +341,8 @@ def GenBOM(brd = None, layer = pcbnew.F_Cu, type = 1, ExcludeRefs = [], ExcludeV
                 bomList[vf].AddRef(r)
             else:
                 bomList[vf] = BOMItem(r,f,v, mod.GetPadCount())
-    print 'there are ', len(bomList), ' items'
-    return bomList
+    print 'there are ', len(bomList), ' items at layer ', layer
+    return sorted(bomList.values(), key = lambda item: item.refs[0])
 
 def layerName(layerId):
     if layerId == pcbnew.F_Cu:
@@ -322,15 +353,15 @@ def layerName(layerId):
 def toMM(v):
     return str(v/1000000.0) + 'mm'
 class POSItem:
-    def __init__(self, mod):
-        self.MidX = toMM(mod.GetPosition().x)
-        self.MidY = toMM(mod.GetPosition().y)
-        self.RefX = toMM(mod.GetPosition().x)
-        self.RefY = toMM(mod.GetPosition().y)
+    def __init__(self, mod, offx = 0, offy = 0):
+        self.MidX = toMM(mod.GetPosition().x-offx)
+        self.MidY = toMM(offy - mod.GetPosition().y)
+        self.RefX = toMM(mod.GetPosition().x-offx)
+        self.RefY = toMM(offy - mod.GetPosition().y)
         pad = GetPad1(mod)
         if pad:
-            self.PadX = toMM(pad.GetPosition().x)
-            self.PadY = toMM(pad.GetPosition().y)
+            self.PadX = toMM(pad.GetPosition().x-offx)
+            self.PadY = toMM(offy - pad.GetPosition().y)
         else:
             print 'Pad1 not found for mod'
             self.PadX = self.MidX
@@ -351,12 +382,14 @@ def GenPos(brd = None, layer = pcbnew.F_Cu, type = 1, ExcludeRefs = [], ExcludeV
     if not brd:
         brd = pcbnew.GetBoard()
     posList = []
+    pt_org = brd.GetAuxOrigin()
     for mod in brd.GetModules():
         needOutput = False
         if (mod.GetLayer() == layer) and (not IsModExclude(mod, ExcludeRefs, ExcludeValues)):
             needOutput = IsSMD(mod) == (type == 1)
         if needOutput:
-            posList.append(POSItem(mod))
+            posList.append(POSItem(mod, pt_org.x, pt_org.y))
+    posList = sorted(posList, key = lambda item: item.ref)
     return posList
 def OutputPosHeader(out = None):
     if not out:
@@ -431,6 +464,10 @@ def PreCompilePattenList(pattenList):
 def GenMFDoc(SplitTopAndBottom = False, ExcludeRef = [], ExcludeValue = [], brd = None):
     if not brd:
         brd = pcbnew.GetBoard()
+    bound = GetBoardBound(brd)
+    org_pt = pcbnew.wxPoint( bound.GetLeft(), bound.GetBottom())
+    brd.SetAuxOrigin(org_pt)
+    print "set board aux origin to left bottom point, at", org_pt
     fName = brd.GetFileName()
     path = os.path.split(fName)[0]
     fName = os.path.split(fName)[1]
@@ -459,11 +496,11 @@ def GenMFDoc(SplitTopAndBottom = False, ExcludeRef = [], ExcludeValue = [], brd 
         print 'Genertate BOM file ', bomName
         csv = OpenCSV(bomName)
         OutputBOMHeader(csv)
-        for k,v in bomSMDTop.items():
+        for v in bomSMDTop:
            v.Output(csv)
         if len(bomHoleTop)>0:
             csv.writerow(['Through Hole Items '])
-            for k,v in bomHoleTop.items():
+            for v in bomHoleTop:
                 v.Output(csv)
         
         # Generate POS for Top layer
@@ -483,11 +520,11 @@ def GenMFDoc(SplitTopAndBottom = False, ExcludeRef = [], ExcludeValue = [], brd 
         print 'Genertate BOM file ', bomName
         csv = OpenCSV(bomName)
         OutputBOMHeader(csv)
-        for  k,v in bomSMDBot.items():
+        for  v in bomSMDBot:
            v.Output(csv)
         if len(bomHoleBot)>0:
             csv.writerow(['Through Hole Items '])
-            for k,v in bomHoleBot.items():
+            for v in bomHoleBot:
                v.Output(csv)
         # Generate POS for Bottom layer   
         print 'Genertate POS file ', posName
@@ -507,17 +544,17 @@ def GenMFDoc(SplitTopAndBottom = False, ExcludeRef = [], ExcludeValue = [], brd 
         print 'Genertate BOM file ', bomName
         csv = OpenCSV(bomName)
         OutputBOMHeader(csv)
-        for k,v in bomSMDTop.items():
+        for v in bomSMDTop:
            v.Output(csv)
            
-        for  k,v in bomSMDBot.items():
+        for  v in bomSMDBot:
            v.Output(csv)
         if len(bomHoleTop)+len(bomHoleBot)>0:
             csv.writerow(['Through Hole Items '])
-            for k,v in bomHoleTop.items():
+            for v in bomHoleTop:
                v.Output(csv)
                
-            for k,v in bomHoleBot.items():
+            for v in bomHoleBot:
                v.Output(csv)
         
         
@@ -538,6 +575,9 @@ def GenMFDoc(SplitTopAndBottom = False, ExcludeRef = [], ExcludeValue = [], brd 
                
             for v in posHoleBot:
                v.Output(csv)
+
+def version():
+    print "1.1"
     
     
     
