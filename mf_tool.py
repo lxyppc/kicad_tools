@@ -101,7 +101,10 @@ def GetBoardBound(brd = None, marginLayer = pcbnew.Edge_Cuts):
     b = None
     for dwg in brd.GetDrawings():
         if dwg.GetLayer() == marginLayer:
-            d = dwg.Cast_to_DRAWSEGMENT()
+            if hasattr(dwg, 'Cast_to_DRAWSEGMENT'):
+                d = dwg.Cast_to_DRAWSEGMENT()
+            else:
+                d = pcbnew.Cast_to_DRAWSEGMENT(dwg)
             w = d.GetWidth()
             box = d.GetBoundingBox()
             box.SetX(box.GetX() + w/2)
@@ -288,9 +291,14 @@ def GetPad1(mod):
     return padx
 def IsSMD(mod):
     for pad in mod.Pads():
-        if pad.GetAttribute() != pcbnew.PAD_SMD:
+        attr_smd = pcbnew.PAD_SMD if hasattr(pcbnew,'PAD_SMD') else pcbnew.PAD_ATTRIB_SMD
+        if pad.GetAttribute() != attr_smd:
             return False
     return True
+def footPrintName(mod):
+    fid = mod.GetFPID()
+    f = fid.GetFootprintName().Cast_to_CChar() if hasattr(fid, 'GetFootprintName') else fid.GetLibItemName().Cast_to_CChar()
+    return f
 
 class BOMItem:
     def __init__(self, ref, footprint, value, pincount):
@@ -334,7 +342,7 @@ def GenBOM(brd = None, layer = pcbnew.F_Cu, type = 1, ExcludeRefs = [], ExcludeV
             needOutput = IsSMD(mod) == (type == 1)
         if needOutput:
             v = mod.GetValue()
-            f = mod.GetFPID().GetFootprintName().Cast_to_CChar()
+            f = footPrintName(mod)
             r = mod.GetReference()
             vf = v + f
             if bomList.has_key(vf):
@@ -370,7 +378,7 @@ class POSItem:
         self.ref = mod.GetReference()
         self.val = mod.GetValue()
         self.layer = layerName(mod.GetLayer())
-        self.fp = mod.GetFPID().GetFootprintName().Cast_to_CChar()
+        self.fp = footPrintName(mod)
     def Output(self, out = None):
         if not out:
             out = csv.writer(sys.stdout, lineterminator='\n', delimiter=',', quotechar='\"', quoting=csv.QUOTE_ALL)
